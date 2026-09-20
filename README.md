@@ -10,6 +10,6 @@ The hyperswitch/ directory points to official juspay/hyperswitch at commit 568a9
 
 ## Current scope
 
-deployment/coolify/staging and deployment/coolify/production document separate environments but contain no deployable manifests, credentials, or verified Coolify application settings. connectors/ records connector ownership; it does not contain implementations. Read docs/architecture.md and AGENTS.md before changing the platform.
+deployment/coolify/staging and deployment/coolify/production document separate environments but contain no deployable manifests, credentials, or verified Coolify application settings. connectors/ records ownership and contains pinned, independently tracked Kashier and EasyKash Git submodules. Registering these integration kits does not compile them into Hyperswitch or change production. Read docs/architecture.md and AGENTS.md before changing the platform.
 
-The previous OpenSwitch checkout contains uncommitted Kashier work that is intentionally absent from this upstream submodule. Its old origin URL points to this platform repository; never push Hyperswitch commits from that checkout to this platform remote.
+The previous OpenSwitch checkout contains uncommitted Kashier work. It is not the source of the Hyperswitch or connector submodules. Its old origin URL points to this platform repository; never push Hyperswitch commits from that checkout to this platform remote.

@@ -1,3 +1,9 @@
 [submodule "hyperswitch"]
 	path = hyperswitch
 	url = https://github.com/juspay/hyperswitch.git
+[submodule "connectors/hyperswitch-kashier-connector"]
+	path = connectors/hyperswitch-kashier-connector
+	url = https://github.com/Byt3Ninja/hyperswitch-kashier-connector.git
+[submodule "connectors/hyperswitch-easykash-connector"]
+	path = connectors/hyperswitch-easykash-connector
+	url = https://github.com/Byt3Ninja/hyperswitch-easykash-connector.git
