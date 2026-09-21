@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "organization": {
+    "display_name": "Healiot LLC",
+    "initial_admin_email": "info@healiot.com"
+  },
+  "defaults": {
+    "country": "EG",
+    "currency": "EGP",
+    "connector": "stripe"
+  },
+  "merchants": [
+    {
+      "key": "growthlabs_production",
+      "display_name": "GrowthLabs",
+      "environment": "production",
+      "profiles": [
+        {
+          "key": "mulkstay_production",
+          "display_name": "MulkStay",
+          "project": "mulkstay",
+          "base_url": "https://mulkstay.com",
+          "stripe_mode": "live"
+        },
+        {
+          "key": "startpad_production",
+          "display_name": "Startpad",
+          "project": "startpad",
+          "base_url": "https://startpad.me",
+          "stripe_mode": "live"
+        },
+        {
+          "key": "hackathon_production",
+          "display_name": "Hackathon",
+          "project": "hackathon",
+          "base_url": "https://play.catalystos.net",
+          "stripe_mode": "live"
+        }
+      ]
+    },
+    {
+      "key": "growthlabs_sandbox",
+      "display_name": "GrowthLabs Sandbox",
+      "environment": "sandbox",
+      "profiles": [
+        {
+          "key": "mulkstay_sandbox",
+          "display_name": "MulkStay Sandbox",
+          "project": "mulkstay",
+          "base_url": "https://staging.mulkstay.com",
+          "stripe_mode": "test"
+        },
+        {
+          "key": "startpad_sandbox",
+          "display_name": "Startpad Sandbox",
+          "project": "startpad",
+          "base_url": "https://staging.startpad.me",
+          "stripe_mode": "test"
+        },
+        {
+          "key": "hackathon_sandbox",
+          "display_name": "Hackathon Sandbox",
+          "project": "hackathon",
+          "base_url": "https://play-staging.catalystos.net",
+          "stripe_mode": "test"
+        }
+      ]
+    },
+    {
+      "key": "healiot_egypt_production",
+      "display_name": "Healiot Egypt",
+      "environment": "production",
+      "profiles": [
+        {
+          "key": "wq3_production",
+          "display_name": "WQ3",
+          "project": "wq3",
+          "base_url": "https://econtract.tawqe3y.com",
+          "stripe_mode": "live"
+        }
+      ]
+    },
+    {
+      "key": "healiot_egypt_sandbox",
+      "display_name": "Healiot Egypt Sandbox",
+      "environment": "sandbox",
+      "profiles": [
+        {
+          "key": "wq3_sandbox",
+          "display_name": "WQ3 Sandbox",
+          "project": "wq3",
+          "base_url": "https://econtract-staging.tawqe3y.com",
+          "stripe_mode": "test"
+        }
+      ]
+    }
+  ],
+  "production_cutover_order": [
+    "startpad",
+    "mulkstay",
+    "hackathon",
+    "wq3"
+  ]
+}
