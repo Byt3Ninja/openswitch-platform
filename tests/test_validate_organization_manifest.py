@@ -46,6 +46,30 @@ class OrganizationManifestTests(unittest.TestCase):
             validate_manifest(data),
         )
 
+    def test_rejects_unknown_root_field(self):
+        data = copy.deepcopy(self.load_manifest())
+        data["unapproved_setting"] = True
+        self.assertIn(
+            "manifest contains unknown field at root: unapproved_setting",
+            validate_manifest(data),
+        )
+
+    def test_rejects_credential_like_key_variants_at_any_schema_level(self):
+        cases = (
+            ("api_key", lambda data: data),
+            ("recovery_code", lambda data: data["organization"]),
+            ("clientSecret", lambda data: data["merchants"][0]["profiles"][0]),
+        )
+
+        for key, target in cases:
+            with self.subTest(key=key):
+                data = copy.deepcopy(self.load_manifest())
+                target(data)[key] = "not-a-credential"
+                self.assertIn(
+                    f"manifest contains forbidden secret-shaped key: {key}",
+                    validate_manifest(data),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

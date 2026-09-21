@@ -6,9 +6,20 @@ from pathlib import Path
 
 
 FORBIDDEN_KEY = re.compile(
-    r"(^|_)(secret|password|token|private_key|api_key_value|webhook_secret)(_|$)",
+    r"(^|_)(api_?key|secret|password|token|private_?key|webhook_?secret|recovery_?code)(_|$)",
     re.IGNORECASE,
 )
+ROOT_FIELDS = {
+    "schema_version",
+    "organization",
+    "defaults",
+    "merchants",
+    "production_cutover_order",
+}
+ORGANIZATION_FIELDS = {"display_name", "initial_admin_email"}
+DEFAULT_FIELDS = {"country", "currency", "connector"}
+MERCHANT_FIELDS = {"key", "display_name", "environment", "profiles"}
+PROFILE_FIELDS = {"key", "display_name", "project", "base_url", "stripe_mode"}
 EXPECTED_PROFILES = {
     "growthlabs_production": {
         "mulkstay_production": ("MulkStay", "mulkstay", "https://mulkstay.com", "live"),
@@ -35,10 +46,14 @@ EXPECTED_MERCHANTS = {
 }
 
 
+def normalized_key(key: str) -> str:
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key).lower()
+
+
 def secret_shaped_keys(value):
     if isinstance(value, dict):
         for key, child in value.items():
-            if FORBIDDEN_KEY.search(key):
+            if FORBIDDEN_KEY.search(normalized_key(key)):
                 yield key
             yield from secret_shaped_keys(child)
     elif isinstance(value, list):
@@ -46,10 +61,41 @@ def secret_shaped_keys(value):
             yield from secret_shaped_keys(child)
 
 
+def unknown_fields(value, allowed_fields, location):
+    if not isinstance(value, dict):
+        return
+    for key in sorted(set(value) - allowed_fields):
+        yield f"manifest contains unknown field at {location}: {key}"
+
+
+def schema_unknown_fields(data):
+    yield from unknown_fields(data, ROOT_FIELDS, "root")
+    yield from unknown_fields(data.get("organization"), ORGANIZATION_FIELDS, "organization")
+    yield from unknown_fields(data.get("defaults"), DEFAULT_FIELDS, "defaults")
+
+    merchants = data.get("merchants")
+    if not isinstance(merchants, list):
+        return
+    for merchant_index, merchant in enumerate(merchants):
+        yield from unknown_fields(merchant, MERCHANT_FIELDS, f"merchants[{merchant_index}]")
+        if not isinstance(merchant, dict):
+            continue
+        profiles = merchant.get("profiles")
+        if not isinstance(profiles, list):
+            continue
+        for profile_index, profile in enumerate(profiles):
+            yield from unknown_fields(
+                profile,
+                PROFILE_FIELDS,
+                f"merchants[{merchant_index}].profiles[{profile_index}]",
+            )
+
+
 def validate_manifest(data: dict) -> list[str]:
     errors = []
     for key in sorted(set(secret_shaped_keys(data))):
         errors.append(f"manifest contains forbidden secret-shaped key: {key}")
+    errors.extend(schema_unknown_fields(data))
 
     if data.get("schema_version") != 1:
         errors.append("schema_version must equal 1")
