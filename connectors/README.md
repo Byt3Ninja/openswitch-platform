@@ -1,9 +1,10 @@
 # Connector ownership registry
 
-Do not copy custom connector source into the platform repository. For each connector, record its authoritative repository, compatible Hyperswitch commit, supported flows, test evidence, and deployment dependency before enabling it.
+Kashier and EasyKash are independent Git submodules. The platform repository tracks their commit pointers, not their source files. Both kits include integration patches for official Hyperswitch commit `568a91925fc7ae1948838e105afdd98210cb3152`; neither is a dynamically loaded plugin. Adding these submodules does not enable a connector in a Hyperswitch binary or change the separately managed production service.
 
-| Connector | Current state | Authoritative implementation repository | Compatibility |
+| Connector | Authoritative repository | Pinned commit | Integration boundary |
 | --- | --- | --- | --- |
-| Kashier | Uncommitted work exists in the original OpenSwitch checkout; not present in the pinned upstream submodule | Not established; decide in a separate connector task | Not verified for the platform repository |
+| Kashier | [hyperswitch-kashier-connector](https://github.com/Byt3Ninja/hyperswitch-kashier-connector) | `10f0957a1d1cd9342bed25d41869c8c0a5a60c7f` | Patch targets the pinned upstream commit; the kit also documents later integration work. Its presence here is not deployment approval. |
+| EasyKash | [hyperswitch-easykash-connector](https://github.com/Byt3Ninja/hyperswitch-easykash-connector) | `7e44e7335c7cc1716294bc1a862c47fb5921b796` | Patch targets the pinned upstream commit; not ported to Hyperswitch v1.126.0 or validated with a live EasyKash account. |
 
-Kashier's in-progress tests and documentation in the original checkout are not production approval. Any shared Hyperswitch enum/router change needs its own upstream-impact review and any required Category E authorization.
+Do not copy connector source into the parent repository. Review each kit's own README, docs, tests, and patch before integration. Shared Hyperswitch enum, router, schema, or registration changes may require Category E approval. Do not apply both patches blindly: they touch overlapping upstream files and need a separate integration plan and tests.
