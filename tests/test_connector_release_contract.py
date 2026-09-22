@@ -159,6 +159,50 @@ class ConnectorReleaseContractTests(unittest.TestCase):
             self.assertIn("kashier", metadata)
             self.assertIn("easykash", metadata)
 
+    def test_builder_memory_contract_rejects_mutable_or_missing_limits(self):
+        helper = self.helper()
+        helper.validate_builder(PACKAGING)
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            import shutil
+            shutil.copytree(PACKAGING / "builder", target / "builder")
+            for filename, directive in (("Dockerfile", "ENV"), ("compile-release.sh", "export")):
+                path = target / "builder" / filename
+                original = path.read_text()
+                for name, value in (("CARGO_BUILD_JOBS", "1"),
+                                    ("CARGO_PROFILE_TEST_DEBUG", "0"),
+                                    ("CARGO_PROFILE_DEV_DEBUG", "0")):
+                    approved = f"{directive} {name}={value}\n"
+                    self.assertIn(approved, original, f"missing immutable {name}")
+                    for replacement in ("", f"{directive} {name}=2\n",
+                                        f"{directive} {name}=${{{name}:-{value}}}\n",
+                                        approved + f"{directive} {name}=2\n"):
+                        with self.subTest(filename=filename, setting=name, replacement=replacement):
+                            path.write_text(original.replace(approved, replacement))
+                            with self.assertRaisesRegex(ValueError, "builder contract.*memory"):
+                                helper.validate_builder(target)
+                            path.write_text(original)
+
+    def test_compile_memory_limits_override_inherited_host_values(self):
+        # Exercise the real entrypoint, stopping at its first Cargo invocation.
+        # Stub only filesystem navigation/creation and Cargo to avoid any build.
+        probe = r'''
+mkdir() { :; }
+cd() { :; }
+cargo() {
+    printf '%s %s %s %s\n' "$CARGO_BUILD_JOBS" "$CARGO_PROFILE_TEST_DEBUG" "$CARGO_PROFILE_DEV_DEBUG" "${CARGO_PROFILE_RELEASE_DEBUG-unset}"
+    exit 73
+}
+. "$1"
+'''
+        result = subprocess.run(["/bin/sh", "-c", probe, "memory-contract",
+                                 str(PACKAGING / "builder/compile-release.sh")],
+                                env={"PATH": "/usr/bin:/bin", "CARGO_BUILD_JOBS": "99",
+                                     "CARGO_PROFILE_TEST_DEBUG": "2", "CARGO_PROFILE_DEV_DEBUG": "2"},
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 73, result.stderr)
+        self.assertEqual(result.stdout, "1 0 0 unset\n")
+
     def test_compatibility_patch_rejects_drift_repeat_and_expanded_scope(self):
         helper = self.helper()
         self.assertTrue(hasattr(helper, "apply_compatibility_patch"), "compatibility gate is missing")

@@ -16,5 +16,9 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && rustc --version && node --version && npm --version
 COPY compile-release.sh /usr/local/bin/compile-release
 ENV CARGO_INCREMENTAL=0
+# Fixed resource policy is part of the immutable builder identity.
+ENV CARGO_BUILD_JOBS=1
+ENV CARGO_PROFILE_TEST_DEBUG=0
+ENV CARGO_PROFILE_DEV_DEBUG=0
 WORKDIR /build
 ENTRYPOINT ["/bin/sh", "/usr/local/bin/compile-release"]

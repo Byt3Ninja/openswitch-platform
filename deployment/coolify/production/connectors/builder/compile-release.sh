@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 # All native compilation executes in the pinned builder at a stable path.
+# Enforce the reviewed resource policy even with conflicting inherited values.
+export CARGO_BUILD_JOBS=1
+export CARGO_PROFILE_TEST_DEBUG=0
+export CARGO_PROFILE_DEV_DEBUG=0
 export HOME=/tmp/build-home CARGO_HOME=/tmp/cargo
 mkdir -p "$HOME" "$CARGO_HOME"
 (

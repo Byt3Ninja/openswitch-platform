@@ -164,6 +164,14 @@ def validate_builder(packaging):
     snapshot = "https://snapshot.debian.org/archive/debian/20250320T000000Z bookworm main"
     if re.findall(r"(?m)^FROM (\S+)", source) != expected or snapshot not in source:
         raise ValueError("builder contract: unreviewed compiler/native-library inputs")
+    compile_script = (packaging / "builder/compile-release.sh").read_text()
+    for name, value in (("CARGO_BUILD_JOBS", "1"),
+                        ("CARGO_PROFILE_TEST_DEBUG", "0"),
+                        ("CARGO_PROFILE_DEV_DEBUG", "0")):
+        for directive, contents in (("ENV", source), ("export", compile_script)):
+            values = re.findall(rf"(?m)^{directive} {name}=(.*)$", contents)
+            if values != [value] or len(re.findall(rf"\b{name}\b", contents)) != 1:
+                raise ValueError(f"builder contract: unreviewed memory setting {name}")
 
 
 def record_release(directory):
