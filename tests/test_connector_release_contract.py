@@ -4,6 +4,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -125,6 +126,57 @@ class ConnectorReleaseContractTests(unittest.TestCase):
                 path.write_text(defect + original)
                 with self.assertRaisesRegex(ValueError, "new production metadata parse failure"):
                     helper.validate_metadata(tree, strict=True)
+
+    def test_builder_contract_rejects_unpinned_or_host_build_inputs(self):
+        helper = self.helper()
+        self.assertTrue(hasattr(helper, "validate_builder"), "pinned builder gate is missing")
+        helper.validate_builder(PACKAGING)
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            import shutil
+            shutil.copytree(PACKAGING / "builder", target / "builder")
+            recipe = target / "builder/Dockerfile"
+            original = recipe.read_text()
+            for old, new in (("@sha256:", ":unpinned-"),
+                             ("snapshot.debian.org", "deb.debian.org")):
+                recipe.write_text(original.replace(old, new))
+                with self.assertRaisesRegex(ValueError, "builder contract"):
+                    helper.validate_builder(target)
+
+    def test_record_requires_runtime_abi_checks_and_identifies_builder(self):
+        helper = self.helper()
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "artifacts").mkdir()
+            for binary in ("router", "scheduler"):
+                (directory / "artifacts" / binary).write_bytes(b"fixture binary")
+            (directory / "builder-id").write_text("sha256:" + "a" * 64)
+            parent_commit = git(ROOT, "rev-parse", "HEAD")
+            def inspect(command, **kwargs):
+                if command[0] == "docker":
+                    return "sha256:" + "b" * 64
+                self.assertEqual(command, ["git", "-C", str(ROOT), "rev-parse", "HEAD"])
+                return parent_commit
+            with patch.object(helper.subprocess, "check_output", side_effect=inspect):
+                with patch.object(helper.subprocess, "run", side_effect=subprocess.CalledProcessError(127, "runtime symbol lookup")):
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        helper.record_release(directory)
+                self.assertFalse((directory / "release.json").exists())
+                with patch.object(helper.subprocess, "run") as runtime:
+                    helper.record_release(directory)
+                self.assertEqual(runtime.call_count, 3)
+                for call in runtime.call_args_list:
+                    argv = call.args[0]
+                    self.assertTrue(call.kwargs["check"])
+                    self.assertIn("--network=none", argv)
+                    self.assertIn("--read-only", argv)
+                    self.assertIn("LD_BIND_NOW=1", argv)
+                    self.assertEqual(argv[-2:], ["sha256:" + "b" * 64, "--version"])
+            record = json.loads((directory / "release.json").read_text())
+            self.assertEqual(record["builder_image_id"], "sha256:" + "a" * 64)
+            self.assertEqual(record["runtime_abi_checked"], ["router", "producer", "consumer"])
+            for image in record["images"].values():
+                self.assertTrue(image["tag"].endswith("-b" + "a" * 64))
 
 
 if __name__ == "__main__":

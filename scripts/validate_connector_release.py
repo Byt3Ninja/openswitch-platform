@@ -32,6 +32,7 @@ def verify_source(repo, revision):
 
 
 def verify_inputs(root):
+    validate_builder(PACKAGING)
     for path, revision in PINS.items():
         verify_source(root / path, revision)
         entry = git(root, "ls-files", "--stage", "--", path).split()
@@ -60,7 +61,8 @@ def apply_patches(root, target, dashboard=False):
 
 
 def prepare_backend(root, target):
-    subprocess.run(["git", "clone", "--quiet", "--shared", "--no-checkout",
+    # Standalone shallow objects remain usable inside the isolated builder.
+    subprocess.run(["git", "clone", "--quiet", "--no-local", "--depth=1", "--no-checkout",
                     str(root / "hyperswitch"), str(target)], check=True)
     git(target, "checkout", "--quiet", "--detach", PINS["hyperswitch"])
     apply_patches(root, target)
@@ -126,19 +128,40 @@ def validate_metadata(tree, strict=False):
             raise ValueError(message) from error
 
 
+def validate_builder(packaging):
+    source = (packaging / "builder/Dockerfile").read_text()
+    expected = [
+        "docker.io/library/node@sha256:1c18d9ab3af4585870b92e4dbc5cac5a0dc77dd13df1a5905cea89fc720eb05b",
+        "docker.io/library/rust@sha256:0ff31c9ffa641a62e48d543fb00b4960955ea375f40776f40f585b89e654cc5e",
+    ]
+    snapshot = "https://snapshot.debian.org/archive/debian/20250320T000000Z bookworm main"
+    if re.findall(r"(?m)^FROM (\S+)", source) != expected or snapshot not in source:
+        raise ValueError("builder contract: unreviewed compiler/native-library inputs")
+
+
 def record_release(directory):
-    version = "hs83cc4876-k10f0957-e50baf0d-ccadc307d"
+    builder = (directory / "builder-id").read_text().strip()
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", builder):
+        raise ValueError("missing pinned builder image ID")
+    version = "hs83cc4876-k10f0957-e50baf0d-ccadc307d-b" + builder.removeprefix("sha256:")
     images = {}
     for role in ROLES:
         tag = f"openswitch/connectors:{role}-{version}"
         image_id = subprocess.check_output(["docker", "image", "inspect", "--format", "{{.Id}}", tag], text=True).strip()
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
             raise ValueError(f"missing image ID: {role}")
+        if role != "dashboard":
+            binary = "router" if role == "router" else "scheduler"
+            subprocess.run(["docker", "run", "--rm", "--platform=linux/amd64", "--network=none",
+                            "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+                            "--env", "LD_BIND_NOW=1", "--entrypoint", f"/local/bin/{binary}",
+                            image_id, "--version"], check=True)
         images[role] = {"tag": tag, "image_id": image_id}
         print(f"{role}: {image_id}")
     checksums = {name: hashlib.sha256((directory / "artifacts" / name).read_bytes()).hexdigest()
                  for name in ("router", "scheduler")}
     record = {"source_pins": PINS, "control_center": DASHBOARD_PIN,
+              "builder_image_id": builder, "runtime_abi_checked": ["router", "producer", "consumer"],
               "parent_commit": git(ROOT, "rev-parse", "HEAD"), "patch_order": ["kashier", "easykash"],
               "images": images, "binary_sha256": checksums, "published": False,
               "deployed": False, "routing": "explicit_only"}
