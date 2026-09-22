@@ -3,6 +3,7 @@ import importlib.util
 import json
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -38,7 +39,8 @@ class ConnectorReleaseContractTests(unittest.TestCase):
         self.assertIn("Registry contract: kashier, easykash", result.stdout)
         self.assertIn("Patch order: kashier -> easykash", result.stdout)
         self.assertIn("no artifacts or images built", result.stdout)
-        self.assertIn("BASELINE METADATA DEFECT", result.stderr)
+        self.assertIn("Compatibility patch: Santander metadata table header", result.stdout)
+        self.assertNotIn("BASELINE METADATA DEFECT", result.stderr)
         for path, sha in PINS.items():
             self.assertEqual(git(ROOT / path, "rev-parse", "HEAD"), sha)
 
@@ -142,6 +144,70 @@ class ConnectorReleaseContractTests(unittest.TestCase):
                 recipe.write_text(original.replace(old, new))
                 with self.assertRaisesRegex(ValueError, "builder contract"):
                     helper.validate_builder(target)
+
+    def test_compatibility_patch_repairs_only_approved_metadata_insertion(self):
+        helper = self.helper()
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp) / "source"
+            helper.prepare_backend(ROOT, tree)
+            helper.validate_metadata(tree, strict=True)
+            metadata = tomllib.loads((tree / "crates/connector_configs/toml/production.toml").read_text())
+            fields = metadata["santander"]["metadata"]["pix_automatico_push"]
+            self.assertEqual([field["name"] for field in fields],
+                             ["client_id", "client_secret", "pix_key_type", "pix_key_value",
+                              "account_number", "account_type", "branch_code"])
+            self.assertIn("kashier", metadata)
+            self.assertIn("easykash", metadata)
+
+    def test_compatibility_patch_rejects_drift_repeat_and_expanded_scope(self):
+        helper = self.helper()
+        self.assertTrue(hasattr(helper, "apply_compatibility_patch"), "compatibility gate is missing")
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            tree = directory / "source"
+            subprocess.run(["git", "clone", "--quiet", "--shared",
+                            str(ROOT / "hyperswitch"), str(tree)], check=True)
+            git(tree, "checkout", "--quiet", "--detach", PINS["hyperswitch"])
+            patch_path = directory / "deployment/coolify/production/connectors/compatibility/santander-metadata.patch"
+            patch_path.parent.mkdir(parents=True)
+            original_patch = (PACKAGING / "compatibility/santander-metadata.patch").read_text()
+            patch_path.write_text(original_patch)
+            name = "crates/connector_configs/toml/production.toml"
+            metadata = tree / name
+            original = metadata.read_text()
+            mutations = (
+                original_patch.replace("+[[santander.metadata.pix_automatico_push]]", "+[[santander.metadata.pix_qr]]"),
+                original_patch.replace("+[[santander.metadata.pix_automatico_push]]", "+[[santander.metadata.pix_automatico_push]]\n+unapproved=true"),
+                original_patch.replace(' name="pix_key_type"', '-name="pix_key_type"'),
+                original_patch.replace(name, "crates/connector_configs/toml/development.toml"),
+                original_patch + "--- a/unapproved\n+++ b/unapproved\n@@ -0,0 +1 @@\n+extra\n",
+            )
+            for mutation in mutations:
+                self.assertNotEqual(mutation, original_patch)
+                patch_path.write_text(mutation)
+                with self.assertRaisesRegex(ValueError, "compatibility patch"):
+                    helper.apply_compatibility_patch(directory, tree)
+                self.assertEqual(metadata.read_text(), original)
+                self.assertEqual(git(tree, "status", "--porcelain"), "")
+            patch_path.write_text(original_patch)
+            metadata.write_text(original + "\n# baseline drift\n")
+            with self.assertRaisesRegex(ValueError, "dirty input"):
+                helper.apply_compatibility_patch(directory, tree)
+            metadata.write_text(original)
+            git(tree, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                "commit", "--allow-empty", "-qm", "wrong baseline")
+            with self.assertRaisesRegex(ValueError, "wrong revision"):
+                helper.apply_compatibility_patch(directory, tree)
+            git(tree, "checkout", "--quiet", "--detach", PINS["hyperswitch"])
+            helper.apply_compatibility_patch(directory, tree)
+            self.assertEqual(git(tree, "diff", "--numstat"), f"1\t0\t{name}")
+            self.assertEqual(git(tree, "diff", "--name-only"), name)
+            additions = [line for line in git(tree, "diff", "--", name).splitlines()
+                         if line.startswith("+") and not line.startswith("+++")]
+            self.assertEqual(additions, ["+[[santander.metadata.pix_automatico_push]]"])
+            tomllib.loads(metadata.read_text())
+            with self.assertRaisesRegex(ValueError, "dirty input"):
+                helper.apply_compatibility_patch(directory, tree)
 
     def test_record_requires_runtime_abi_checks_and_identifies_builder(self):
         helper = self.helper()

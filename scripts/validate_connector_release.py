@@ -1,5 +1,6 @@
 """Fail-closed source and packaging checks; never contacts a running service."""
 import argparse
+import difflib
 import hashlib
 import json
 import re
@@ -65,7 +66,33 @@ def prepare_backend(root, target):
     subprocess.run(["git", "clone", "--quiet", "--no-local", "--depth=1", "--no-checkout",
                     str(root / "hyperswitch"), str(target)], check=True)
     git(target, "checkout", "--quiet", "--detach", PINS["hyperswitch"])
+    apply_compatibility_patch(root, target)
     apply_patches(root, target)
+
+
+def apply_compatibility_patch(root, target):
+    # User-approved temporary repair, valid only before connector integration.
+    verify_source(target, "83cc4876dd067ff16bcac51ce2737ee0fe0bf8b1")
+    name = "crates/connector_configs/toml/production.toml"
+    source = (target / name).read_text()
+    anchor = 'type="Text"\nname="pix_key_type"\n'
+    insertion = 'type="Text"\n[[santander.metadata.pix_automatico_push]]\nname="pix_key_type"\n'
+    if source.count(anchor) != 1:
+        raise ValueError("compatibility patch: approved insertion point drifted")
+    repaired = source.replace(anchor, insertion, 1)
+    expected_patch = "".join(difflib.unified_diff(
+        source.splitlines(keepends=True), repaired.splitlines(keepends=True),
+        fromfile=f"a/{name}", tofile=f"b/{name}"))
+    path = root / "deployment/coolify/production/connectors/compatibility/santander-metadata.patch"
+    if path.read_text() != expected_patch:
+        raise ValueError("compatibility patch: scope differs from the approved one-line insertion")
+    # Require whole-file validity, without stripping or suppressing any metadata.
+    tomllib.loads(repaired)
+    git(target, "apply", "--check", str(path))
+    git(target, "apply", str(path))
+    if (target / name).read_text() != repaired:
+        raise ValueError("compatibility patch: unexpected applied contents")
+    print("Compatibility patch: Santander metadata table header", flush=True)
 
 
 def block(source, declaration):
