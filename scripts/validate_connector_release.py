@@ -1,0 +1,180 @@
+"""Fail-closed source and packaging checks; never contacts a running service."""
+import argparse
+import hashlib
+import json
+import re
+import subprocess
+import sys
+import tempfile
+import tomllib
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGING = ROOT / "deployment/coolify/production/connectors"
+PINS = {
+    "hyperswitch": "83cc4876dd067ff16bcac51ce2737ee0fe0bf8b1",
+    "connectors/hyperswitch-kashier-connector": "10f0957a1d1cd9342bed25d41869c8c0a5a60c7f",
+    "connectors/hyperswitch-easykash-connector": "50baf0d196cb4e6726bd6b786e6e305260ac2fbe",
+}
+DASHBOARD_PIN = "adc307d08c87862380f966af44b849ddfee21dcc"
+ROLES = ("router", "producer", "consumer", "dashboard")
+
+
+def git(repo, *args):
+    return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
+
+
+def verify_source(repo, revision):
+    if git(repo, "rev-parse", "HEAD") != revision:
+        raise ValueError(f"wrong revision: {repo.name}; expected {revision}")
+    if git(repo, "status", "--porcelain", "--untracked-files=all"):
+        raise ValueError(f"dirty input: {repo.name}")
+
+
+def verify_inputs(root):
+    for path, revision in PINS.items():
+        verify_source(root / path, revision)
+        entry = git(root, "ls-files", "--stage", "--", path).split()
+        if len(entry) != 4 or entry[0] != "160000" or entry[1] != revision:
+            raise ValueError(f"incorrect gitlink: {path}")
+    from scripts.validate_connector_rollout_manifest import validate_manifest
+    errors = validate_manifest(json.loads((PACKAGING / "desired-state.json").read_text()))
+    if errors:
+        raise ValueError("invalid sandbox manifest: " + "; ".join(errors))
+    for role in ROLES:
+        dockerfile = (PACKAGING / "images" / f"{role}.Dockerfile").read_text()
+        reference = (root / "connectors/hyperswitch-kashier-connector/deploy"
+                     / f"{role}.Dockerfile").read_text()
+        if dockerfile != reference or not re.search(r"^FROM \S+@sha256:[0-9a-f]{64}$", dockerfile, re.M):
+            raise ValueError(f"unreviewed runtime packaging: {role}")
+
+
+def apply_patches(root, target, dashboard=False):
+    for connector in ("kashier", "easykash"):
+        version = "control-center-v1.38.8" if dashboard else "v1.126.0"
+        suffix = "-after-kashier" if connector == "easykash" else ""
+        patch = root / f"connectors/hyperswitch-{connector}-connector/patches/hyperswitch-{version}{suffix}.patch"
+        git(target, "apply", "--check", str(patch))
+        git(target, "apply", str(patch))
+    print("Patch order: kashier -> easykash", flush=True)
+
+
+def prepare_backend(root, target):
+    subprocess.run(["git", "clone", "--quiet", "--shared", "--no-checkout",
+                    str(root / "hyperswitch"), str(target)], check=True)
+    git(target, "checkout", "--quiet", "--detach", PINS["hyperswitch"])
+    apply_patches(root, target)
+
+
+def block(source, declaration):
+    start = source.index("{", source.index(declaration)) + 1
+    depth = 1
+    for index in range(start, len(source)):
+        depth += (source[index] == "{") - (source[index] == "}")
+        if depth == 0:
+            return source[start:index]
+    raise ValueError(f"unterminated source block: {declaration}")
+
+
+def validate_registries(tree):
+    broad = (tree / "crates/common_enums/src/connector_enums.rs").read_text()
+    routing = (tree / "crates/euclid/src/enums.rs").read_text()
+    connector = block(broad, "pub enum Connector ")
+    routable = block(routing, "pub enum RoutableConnectors ")
+    forward = block(routing, "impl TryFrom<Connector> for RoutableConnectors")
+    reverse = block(routing, "impl From<RoutableConnectors> for Connector")
+    for variant in ("Kashier", "Easykash"):
+        requirements = (
+            (connector, rf"(?m)^    {variant},$", "Connector"),
+            (routable, rf"(?m)^    {variant},$", "RoutableConnectors"),
+            (forward, rf"Connector::{variant}\s*=>\s*Ok\(Self::{variant}\)", "forward mapping"),
+            (reverse, rf"RoutableConnectors::{variant}\s*=>\s*Self::{variant}", "reverse mapping"),
+        )
+        for source, pattern, label in requirements:
+            if not re.search(pattern, source):
+                raise ValueError(f"registry contract: missing {variant} in {label}")
+    print("Registry contract: kashier, easykash", flush=True)
+
+
+def validate_metadata(tree, strict=False):
+    path = "crates/connector_configs/toml/production.toml"
+    source = (tree / path).read_text()
+    try:
+        tomllib.loads(source)
+    except tomllib.TOMLDecodeError as error:
+        baseline = git(tree, "show", f"{PINS['hyperswitch']}:{path}")
+        pattern = r"(?ms)^\[santander\]\n.*?(?=^\[(?!\[?santander[.\]])|\Z)"
+        known = re.search(pattern, baseline)
+        current = re.search(pattern, source)
+        if not known or not current or known[0] != current[0]:
+            raise ValueError("new production metadata parse failure") from error
+        try:
+            # Diagnostic only: never change production metadata or ship stripped data.
+            tomllib.loads(re.sub(pattern, "", source))
+        except tomllib.TOMLDecodeError as detail:
+            raise ValueError("new production metadata parse failure") from detail
+        try:
+            tomllib.loads(known[0])
+        except tomllib.TOMLDecodeError as detail:
+            if "Cannot overwrite a value" not in str(detail):
+                raise ValueError("new production metadata parse failure") from detail
+        else:
+            raise ValueError("new production metadata parse failure") from error
+        message = "BASELINE METADATA DEFECT: official production.toml has duplicate Santander name; release build blocked"
+        print(message, file=sys.stderr)
+        if strict:
+            raise ValueError(message) from error
+
+
+def record_release(directory):
+    version = "hs83cc4876-k10f0957-e50baf0d-ccadc307d"
+    images = {}
+    for role in ROLES:
+        tag = f"openswitch/connectors:{role}-{version}"
+        image_id = subprocess.check_output(["docker", "image", "inspect", "--format", "{{.Id}}", tag], text=True).strip()
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+            raise ValueError(f"missing image ID: {role}")
+        images[role] = {"tag": tag, "image_id": image_id}
+        print(f"{role}: {image_id}")
+    checksums = {name: hashlib.sha256((directory / "artifacts" / name).read_bytes()).hexdigest()
+                 for name in ("router", "scheduler")}
+    record = {"source_pins": PINS, "control_center": DASHBOARD_PIN,
+              "parent_commit": git(ROOT, "rev-parse", "HEAD"), "patch_order": ["kashier", "easykash"],
+              "images": images, "binary_sha256": checksums, "published": False,
+              "deployed": False, "routing": "explicit_only"}
+    (directory / "release.json").write_text(json.dumps(record, indent=2) + "\n")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("mode", choices=("validate", "prepare", "dashboard", "record"))
+    parser.add_argument("directory", nargs="?", type=Path)
+    args = parser.parse_args()
+    if args.mode == "record":
+        record_release(args.directory)
+        return
+    verify_inputs(ROOT)
+    if args.mode == "dashboard":
+        verify_source(args.directory, DASHBOARD_PIN)
+        apply_patches(ROOT, args.directory, dashboard=True)
+        return
+    if args.mode == "prepare":
+        prepare_backend(ROOT, args.directory)
+        validate_registries(args.directory)
+        validate_metadata(args.directory, strict=True)
+        return
+    with tempfile.TemporaryDirectory(prefix="openswitch-release-validate-") as tmp:
+        tree = Path(tmp) / "hyperswitch"
+        prepare_backend(ROOT, tree)
+        validate_registries(tree)
+        validate_metadata(tree)
+    print("Validation complete; no artifacts or images built")
+
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
+    try:
+        main()
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+        print(f"Release validation failed: {error}", file=sys.stderr)
+        sys.exit(1)
