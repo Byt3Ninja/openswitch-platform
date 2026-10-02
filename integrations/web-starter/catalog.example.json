@@ -1,0 +1,14 @@
+[
+  {
+    "id": "demo-usd",
+    "label": "Simulated USD sample product",
+    "amount": 1250,
+    "currency": "USD"
+  },
+  {
+    "id": "demo-gbp",
+    "label": "Simulated GBP sample product",
+    "amount": 900,
+    "currency": "GBP"
+  }
+]

@@ -1,0 +1,8 @@
+.env
+.env.*
+state/
+releases/
+release/
+*.zip
+SHA256SUMS
+node_modules/
