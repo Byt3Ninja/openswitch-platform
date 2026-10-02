@@ -1,6 +1,6 @@
 # Generic OpenSwitch SDK integration package design
 
-Status: proposed for written review. Date: 2026-10-02.
+Status: approved by the user on 2026-10-02. Implementation plan review pending.
 
 ## Purpose and success criteria
 
@@ -145,7 +145,7 @@ no new worktree or heavy Rust build. A later implementation commit can be revert
 independently; old release ZIPs are retained, not overwritten. SDK deployment
 hardening and production EGP/provider validation remain separate approved work.
 
-After approval of this written design, prepare the implementation plan, review it
+Following approval of this written design, prepare the implementation plan, review it
 with the user and select execution method before writing product code. Only then
-build and test the package. Current approval permits design work, not claims that
+build and test the package. Current approval permits planning, not claims that
 the replacement SDK package is already complete.
