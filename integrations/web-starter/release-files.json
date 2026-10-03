@@ -1,4 +1,6 @@
 [
+  ".gitignore",
+  ".nvmrc",
   "README.md",
   "package.json",
   "catalog.example.json",
@@ -27,6 +29,7 @@
   "test/checkout-service.test.mjs",
   "test/config.test.mjs",
   "test/support/fake-api.mjs",
+  "test/support/capacity-state.mjs",
   "test/payment-api.test.mjs",
   "test/order-store.test.mjs",
   "test/checkout-controller.test.mjs",

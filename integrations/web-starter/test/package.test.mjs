@@ -107,10 +107,30 @@ test('requested release version must match the source version', async t => {
 test('unsafe allowlist entries are rejected', async t => {
   const f = await fixture(t);
   const buildRelease = await builder();
-  for (const file of ['../private', '/absolute', '.env', 'state/orders.json', 'node_modules/x', '.cache/x', 'src/../package.json']) {
+  for (const file of ['../private', '/absolute', '.env', '.env.local', '.env.example', '.hidden', 'src/.gitignore', 'src/.nvmrc', '.gitignore/private', './.gitignore', 'state/orders.json', 'node_modules/x', '.cache/x', 'src/../package.json']) {
     await fs.writeFile(path.join(f.sourceDir, 'release-files.json'), JSON.stringify([...f.files, file]));
     await assert.rejects(buildRelease({ ...f, version: '0.1.0' }), /allowlist/i);
     await assert.rejects(fs.stat(f.outputDir), { code: 'ENOENT' });
+  }
+});
+
+test('release can include only the two reviewed root dotfiles with their actual safeguards', async t => {
+  const f = await fixture(t);
+  const files = [...f.files, '.gitignore', '.nvmrc'];
+  await fs.writeFile(path.join(f.sourceDir, '.gitignore'), '.env\n.env.*\nstate/\n');
+  await fs.writeFile(path.join(f.sourceDir, '.nvmrc'), '24\n');
+  await fs.writeFile(path.join(f.sourceDir, 'release-files.json'), JSON.stringify(files));
+  const release = await (await builder())(f);
+  const unpack = path.join(f.root, 'unpack');
+  execFileSync('unzip', ['-q', release.archivePath, '-d', unpack]);
+  const root = path.join(unpack, path.basename(release.stageDir));
+  assert.equal(await fs.readFile(path.join(root, '.gitignore'), 'utf8'), '.env\n.env.*\nstate/\n');
+  assert.equal(await fs.readFile(path.join(root, '.nvmrc'), 'utf8'), '24\n');
+  execFileSync('git', ['init', '-q', root]);
+  for (const file of ['.env', '.env.local', 'state/order.json']) {
+    await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
+    await fs.writeFile(path.join(root, file), 'SYNTHETIC_PRIVATE_CANARY');
+    assert.equal(execFileSync('git', ['check-ignore', file], { cwd: root, encoding: 'utf8' }).trim(), file);
   }
 });
 

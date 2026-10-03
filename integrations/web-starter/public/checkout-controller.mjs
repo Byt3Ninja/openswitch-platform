@@ -27,7 +27,7 @@ export function createCheckoutController({ api, sdkLoader, render }) {
       order: order ? { ...order } : null, paid: Boolean(paid), terminal: Boolean(terminal),
       ready: Boolean(order?.phase === 'ready' && (config.mode === 'demo' || widgetReady)),
       submitting: busy !== null, busy, error, uncertain, restored,
-      canStart: Boolean(config && !order && !busy && !uncertain),
+      canStart: Boolean(config && (!order || order.phase === 'new') && !busy && !uncertain),
       canConfirm: Boolean(config?.mode === 'sandbox' && widgetReady && order?.phase === 'ready' && !busy && !uncertain && !attempted),
       canCompleteDemo: Boolean(config?.mode === 'demo' && order?.phase === 'ready' && !busy && !uncertain),
       canRefresh: Boolean(order && !busy),
@@ -113,13 +113,18 @@ export function createCheckoutController({ api, sdkLoader, render }) {
     },
 
     async start() {
-      if (!config || order || busy || uncertain) return;
+      if (!config || (order && order.phase !== 'new') || busy || uncertain) return;
       await run('starting', 'Checkout could not be prepared. Check order status before taking another payment action.', async token => {
-        const created = await api.newOrder(selectedCatalogId);
-        if (token !== epoch) return;
-        const checkedOrder = validate(created, null);
-        if (checkedOrder.catalogId !== selectedCatalogId) throw new Error('ORDER_MISMATCH');
-        order = checkedOrder;
+        if (!order) {
+          const created = await api.newOrder(selectedCatalogId);
+          if (token !== epoch) return;
+          const checkedOrder = validate(created, null);
+          if (checkedOrder.catalogId !== selectedCatalogId) throw new Error('ORDER_MISMATCH');
+          order = checkedOrder;
+        }
+        // Authoritatively recovered new orders have never prepared a payment.
+        // Explicit preparation retains their identity and can mount a new form.
+        restored = false;
         // Render the opaque order ID before starting the payment so return recovery can persist it.
         emit();
         const session = await api.checkout(order.id);

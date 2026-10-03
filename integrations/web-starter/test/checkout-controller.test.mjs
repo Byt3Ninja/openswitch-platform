@@ -229,6 +229,50 @@ test('return recovery retrieves only the opaque local order and ignores browser 
   assert.equal(h.sdkLoads, 0);
 });
 
+for (const mode of ['demo', 'sandbox']) {
+  test(`recovered new ${mode} order can be explicitly prepared once with its original identity`, async () => {
+    const pending = deferred();
+    const simulated = mode === 'demo';
+    const h = setup({ config: { mode, catalog: [config.catalog[0]], publishableKey: 'public-test-key' },
+      status: { phase: 'new', status: 'not_created', simulated },
+      api: { checkout: async id => {
+        h.calls.push(['checkout', id]);
+        await pending.promise;
+        return { ...readyOrder, simulated, ...(simulated ? {} : { clientSecret: 'test-client-secret' }) };
+      } },
+    });
+    await h.controller.initialize();
+    await h.controller.restoreOrder('order_one');
+    assert.equal(h.view.canStart, true);
+    const start = h.controller.start();
+    await h.controller.start();
+    pending.resolve();
+    await start;
+    await h.controller.start();
+    assert.deepEqual(h.calls, [['status', 'order_one'], ['checkout', 'order_one']]);
+    assert.equal(h.view.order.paymentId, 'pay_one');
+    assert.equal(h.view.order.id, 'order_one');
+    assert.equal(h.view.ready, true);
+    assert.equal(h.view.canStart, false);
+    assert.equal(h.view.canConfirm, !simulated);
+  });
+}
+
+for (const phase of ['creating', 'uncertain', 'ready', 'paid', 'failed']) {
+  test(`recovered sandbox ${phase} order cannot prepare or reconstruct a session`, async () => {
+    const status = phase === 'paid' ? 'succeeded' : phase === 'failed' ? 'failed' : 'requires_payment_method';
+    const h = setup({ config: { mode: 'sandbox', catalog: [config.catalog[0]] }, status: { phase, status, simulated: false } });
+    await h.controller.initialize();
+    await h.controller.restoreOrder('order_one');
+    await h.controller.start();
+    assert.equal(h.view.canStart, false);
+    assert.equal(h.view.canConfirm, false);
+    assert.equal(h.view.canRefresh, true);
+    assert.deepEqual(h.calls, [['status', 'order_one']]);
+    assert.equal(h.sdkLoads, 0);
+  });
+}
+
 test('return recovery rejects a wrong order identity or catalog financial terms', async () => {
   for (const status of [{ id: 'order_other' }, { amount: 1 }]) {
     const h = setup({ status: { phase: 'paid', status: 'succeeded', ...status } });

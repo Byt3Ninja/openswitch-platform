@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { openOrderStore } from '../src/order-store.mjs';
+import { capacityState } from './support/capacity-state.mjs';
 
 const moduleUrl = new URL('../src/order-store.mjs', import.meta.url);
 const opened = new Map();
@@ -138,6 +139,25 @@ test('a paid phase without succeeded status is corrupt', async t => {
   await store.save(order);
   await fs.writeFile(path.join(dir, 'state.json'), JSON.stringify({ version: 1, namespace, orders: { order_example: { ...order, phase: 'paid', paymentStatus: 'requires_capture' } } }));
   await assert.rejects(store.get(order.id), { code: 'STORE_CORRUPT' });
+});
+
+// Catches a write exceeding the read limit or treating character count as byte count.
+test('UTF-8 capacity rejection preserves the exact readable prior state across restart', async t => {
+  const dir = await directory(t);
+  const ns = { ...namespace, profileId: 'synthetic-ü-profile' };
+  const original = { ...order, profileId: ns.profileId, phase: 'creating' };
+  const store = await open({ directory: dir, namespace: ns });
+  const before = capacityState(ns, original, 16 * 1024 * 1024);
+  assert.ok(before.length < Buffer.byteLength(before));
+  await fs.writeFile(path.join(dir, 'state.json'), before);
+  assert.deepEqual(await store.get(order.id), original);
+  await assert.rejects(store.save({ ...original, phase: 'uncertain' }), { code: 'STORE_CAPACITY_EXCEEDED' });
+  assert.equal(await fs.readFile(path.join(dir, 'state.json'), 'utf8'), before);
+  assert.deepEqual(await store.get(order.id), original);
+  assert.deepEqual((await fs.readdir(dir)).sort(), ['.lock', 'state.json']);
+  await store.close();
+  const recovered = await open({ directory: dir, namespace: ns });
+  assert.deepEqual(await recovered.get(order.id), original);
 });
 
 // Catches rename failure committing an unpersisted in-memory update.

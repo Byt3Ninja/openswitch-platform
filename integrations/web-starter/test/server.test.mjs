@@ -135,6 +135,55 @@ test('real demo order transitions use catalog terms and ignore return query paym
   assert.equal((await f.get(`/api/orders/${order.id}`)).json().simulated, true);
 });
 
+// Catches the provider landing being rejected before safe browser recovery runs.
+test('provider-style return navigation serves only the shell without trusting queries', async t => {
+  let calls = 0;
+  const service = Object.fromEntries(['newOrder', 'start', 'status', 'completeDemo'].map(name => [name, async () => { calls++; }]));
+  const f = await fixture(t, { service });
+  const headers = { 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' };
+  const response = await request(f.config.localOrigin, `/return?status=succeeded&client_secret=${rawSecret}`, { headers });
+  assert.equal(response.status, 200);
+  assert.equal(response.text, '<!doctype html><p>Fixture application</p>');
+  assert.equal(response.text.includes(rawSecret), false);
+  assert.equal(calls, 0);
+});
+
+test('return navigation exception cannot reach APIs, subresources or mutations', async t => {
+  const f = await fixture(t);
+  const navigation = { 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' };
+  for (const route of ['/', '/return/', '/%72eturn', '/api/config', '/api/orders/order_one', '/checkout.mjs', '/favicon.ico']) {
+    assert.equal((await request(f.config.localOrigin, route, { headers: navigation })).status, 403, route);
+  }
+  for (const headers of [
+    { host: 'attacker.example' }, { origin: 'https://attacker.example' }, { origin: 'null' },
+    { 'sec-fetch-mode': 'cors' }, { 'sec-fetch-mode': 'no-cors' }, { 'sec-fetch-mode': undefined },
+    { 'sec-fetch-dest': 'iframe' }, { 'sec-fetch-dest': 'script' }, { 'sec-fetch-dest': undefined },
+    { 'sec-fetch-site': 'same-site' },
+  ]) {
+    const combined = { ...navigation, ...headers };
+    for (const key of Object.keys(combined)) if (combined[key] === undefined) delete combined[key];
+    assert.equal((await request(f.config.localOrigin, '/return', { headers: combined })).status, 403);
+  }
+  for (const method of ['HEAD', 'POST', 'PUT', 'OPTIONS']) {
+    assert.equal((await request(f.config.localOrigin, '/return', { method, headers: {
+      ...navigation, origin: f.config.localOrigin, 'x-csrf-token': f.token,
+    } })).status, 403, method);
+  }
+  assert.equal((await f.post('/api/orders', { catalogId: 'sample' }, navigation)).status, 403);
+});
+
+test('automatic favicon request is handled with unchanged same-origin security headers', async t => {
+  const f = await fixture(t);
+  const response = await f.get('/favicon.ico');
+  assert.equal(response.status, 204);
+  assert.equal(response.text, '');
+  assert.match(response.headers['content-security-policy'], /img-src 'self';/u);
+  assert.match(response.headers['content-security-policy'], /default-src 'none';/u);
+  assert.equal(response.headers['x-content-type-options'], 'nosniff');
+  assert.equal((await request(f.config.localOrigin, '/favicon.ico', { headers: { host: 'attacker.example' } })).status, 403);
+  assert.equal((await f.get('/favicon.ico/../state.json')).status, 404);
+});
+
 // Catches sandbox exposing simulation or secrets on general order/status routes.
 test('sandbox exposes a client secret only at checkout and has no demo-result route', async t => {
   const f = await fixture(t, { mode: 'sandbox' });

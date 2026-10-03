@@ -65,6 +65,12 @@ export function createServer({ config, service, staticDir = defaultStaticDir }) 
       if (request.method === 'GET' && route === '/api/config') {
         return json(response, 200, { ...publicConfig(config), csrfToken });
       }
+      // Browsers request this automatically; an empty response needs no asset
+      // discovery and does not expand the static file or CSP allowlists.
+      if (request.method === 'GET' && route === '/favicon.ico') {
+        response.writeHead(204);
+        return response.end();
+      }
       if (request.method === 'GET' && staticPaths.has(route)) {
         const [filename, contentType] = staticPaths.get(route);
         return await serveStatic(response, staticDir, filename, contentType);

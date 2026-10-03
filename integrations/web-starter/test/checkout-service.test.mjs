@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createDemoApi } from '../src/demo-api.mjs';
 import { openOrderStore } from '../src/order-store.mjs';
 import { createCheckoutService } from '../src/checkout-service.mjs';
+import { capacityState } from './support/capacity-state.mjs';
 
 const catalog = [
   { id: 'sample', label: 'Simulated sample', amount: 1700, currency: 'GBP' },
@@ -41,6 +42,53 @@ function payment(order, changes = {}) {
   };
 }
 function apiError(code, ambiguous) { return Object.assign(new Error('dummy-raw-secret'), { code, ambiguous }); }
+
+for (const rejection of [null, undefined]) {
+  test(`nullish create rejection ${String(rejection)} becomes uncertain and only retrieves the original ID`, async t => {
+    const f = await fixture(t);
+    let creates = 0;
+    let original;
+    const ids = [];
+    const service = f.service({
+      async create(order) { creates++; original = order; throw rejection; },
+      async retrieve(id) { ids.push(id); return payment(original, { status: 'processing' }); },
+    });
+    const order = await service.newOrder('sample');
+    await assert.rejects(service.start(order.id), { code: 'CHECKOUT_UNCERTAIN' });
+    assert.equal((await f.store.get(order.id)).phase, 'uncertain');
+    assert.equal((await service.start(order.id)).paymentId, order.paymentId);
+    assert.equal(creates, 1);
+    assert.deepEqual(ids, [order.paymentId]);
+  });
+}
+
+// Catches capacity loss making an ambiguous financial identity unreadable or repeatable.
+test('capacity refusal after ambiguous create keeps the durable creating ID recoverable', async t => {
+  const f = await fixture(t);
+  let creates = 0;
+  const service = f.service({ async create() { creates++; throw apiError('API_TIMEOUT', true); } });
+  const order = await service.newOrder('sample');
+  const original = await f.store.get(order.id);
+  const namespace = { mode: f.config.mode, apiOrigin: f.config.apiBaseUrl, profileId: f.config.profileId };
+  await fs.writeFile(path.join(f.directory, 'state.json'), capacityState(namespace, original, 16 * 1024 * 1024 - 5));
+  await assert.rejects(service.start(order.id), { code: 'STORE_CAPACITY_EXCEEDED' });
+  assert.equal(creates, 1);
+  const saved = await f.store.get(order.id);
+  assert.equal(saved.phase, 'creating');
+  assert.equal(saved.paymentId, order.paymentId);
+  assert.equal((await fs.stat(path.join(f.directory, 'state.json'))).size, 16 * 1024 * 1024);
+  await f.store.close();
+  const store = await f.reopen();
+  const ids = [];
+  const recovered = createCheckoutService({ config: f.config, store, api: {
+    async create() { creates++; throw new Error('duplicate create'); },
+    async retrieve(id) { ids.push(id); return payment(saved, { status: 'processing' }); },
+  } });
+  for (let i = 0; i < 2; i++) await assert.rejects(recovered.start(order.id), { code: 'STORE_CAPACITY_EXCEEDED' });
+  assert.equal(creates, 1);
+  assert.deepEqual(ids, [order.paymentId, order.paymentId]);
+  assert.equal((await store.get(order.id)).phase, 'creating');
+});
 
 // Catches requesting a payment before its stable identity is on durable storage.
 test('the creating identity is persisted before the API and concurrent starts create once', async t => {

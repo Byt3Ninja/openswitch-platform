@@ -117,7 +117,7 @@ export function createCheckoutService({ config, store, api }) {
           payment = await api.create({ ...order, profileId: demo ? undefined : order.profileId });
           match(order, payment, true);
         } catch (error) {
-          const uncertain = error.code === 'CHECKOUT_PAYMENT_MISMATCH' || error.ambiguous !== false;
+          const uncertain = error?.code === 'CHECKOUT_PAYMENT_MISMATCH' || error?.ambiguous !== false;
           await store.save(uncertain ? { ...order, phase: 'uncertain' } :
             { ...order, phase: 'failed', paymentStatus: 'failed' });
           throw checkoutError(uncertain ? 'CHECKOUT_UNCERTAIN' : 'CHECKOUT_FAILED');

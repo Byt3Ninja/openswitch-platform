@@ -18,6 +18,7 @@ const paymentStatuses = new Set([
 ]);
 const identityFields = ['id', 'catalogId', 'amount', 'currency', 'profileId', 'paymentId', 'returnUrl'];
 const orderFields = new Set([...identityFields, 'phase', 'paymentStatus']);
+const stateByteLimit = 16 * 1024 * 1024;
 
 function storeError(code, message = code) {
   return Object.assign(new Error(message), { code });
@@ -112,7 +113,7 @@ export async function openOrderStore({ directory, namespace }) {
     try {
       handle = await fs.open(statePath, constants.O_RDONLY | constants.O_NOFOLLOW);
       const info = await handle.stat();
-      if (!info.isFile() || info.size > 16 * 1024 * 1024) throw storeError('STORE_CORRUPT');
+      if (!info.isFile() || info.size > stateByteLimit) throw storeError('STORE_CORRUPT');
       await handle.chmod(0o600);
       state = JSON.parse(await handle.readFile('utf8'));
     } catch (error) {
@@ -130,11 +131,15 @@ export async function openOrderStore({ directory, namespace }) {
   }
 
   async function writeState(state) {
+    const serialized = JSON.stringify(state);
+    // Reject before creating/replacing any file so the prior state remains
+    // readable, including a creating identity after an ambiguous API outcome.
+    if (Buffer.byteLength(serialized, 'utf8') > stateByteLimit) throw storeError('STORE_CAPACITY_EXCEEDED');
     const temporary = path.join(directory, `.state-${randomUUID()}.tmp`);
     let handle;
     try {
       handle = await fs.open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      await handle.writeFile(JSON.stringify(state));
+      await handle.writeFile(serialized);
       await handle.sync();
       await handle.close();
       handle = undefined;

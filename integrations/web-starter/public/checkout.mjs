@@ -164,7 +164,7 @@ async function boot() {
       byId('backend-status').textContent = view.order ? `${view.mode === 'demo' ? 'Simulated · ' : ''}${view.order.status}` : '';
       if (view.order) saveOrderId(storage, view.order);
       byId('checkout-region').setAttribute('aria-busy', String(view.submitting));
-      start.hidden = Boolean(view.order);
+      start.hidden = Boolean(view.order && view.order.phase !== 'new');
       start.disabled = !view.canStart;
       start.textContent = view.busy === 'starting' ? 'Preparing checkout…' : view.mode === 'sandbox' ? 'Prepare sandbox checkout' : 'Start simulated checkout';
       confirm.hidden = !(view.mode === 'sandbox' && view.order && !view.terminal);

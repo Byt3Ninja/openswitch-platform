@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 const run = promisify(execFile);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const blocked = new Set(['state', 'cache', 'node_modules', 'dist', 'build', 'coverage']);
+const safeRootDotfiles = new Set(['.gitignore', '.nvmrc']);
 
 async function canonical(directory) {
   try { return await fs.realpath(directory); }
@@ -66,9 +67,11 @@ export async function buildRelease({ sourceDir, outputDir, version }) {
   const files = JSON.parse(await readInput(source, 'release-files.json'));
   if (!Array.isArray(files) || files.length === 0 || new Set(files).size !== files.length ||
       !files.includes('package.json') || !files.includes('release-files.json') || files.some(file =>
-        typeof file !== 'string' || !/^[A-Za-z0-9_-][A-Za-z0-9_./-]*$/u.test(file) ||
-        file.split('/').some(segment => !segment || segment.startsWith('.') || blocked.has(segment)) ||
-        file === 'RELEASE-MANIFEST.json')) throw new Error('Release allowlist contains unsafe or duplicate paths');
+        typeof file !== 'string' || (!safeRootDotfiles.has(file) && (
+          !/^[A-Za-z0-9_-][A-Za-z0-9_./-]*$/u.test(file) ||
+          file.split('/').some(segment => !segment || segment.startsWith('.') || blocked.has(segment)) ||
+          file === 'RELEASE-MANIFEST.json'
+        )))) throw new Error('Release allowlist contains unsafe or duplicate paths');
   // Validate and snapshot every input before creating any release path.
   const contents = new Map();
   for (const file of [...files].sort()) contents.set(file, await readInput(source, file));

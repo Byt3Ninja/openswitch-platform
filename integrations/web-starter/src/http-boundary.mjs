@@ -20,9 +20,14 @@ export function boundaryError(code) { return Object.assign(new Error(code), { co
 export function guardRequest(request, { config, csrfToken, mutation = false }) {
   const { headers } = request;
   const host = new URL(config.localOrigin).host;
+  // A provider may return through a top-level document navigation. This exact
+  // static-shell exception grants no API access or authority to query claims.
+  const returnDocument = request.method === 'GET' && request.url?.split('?')[0] === '/return' &&
+    headers['sec-fetch-site'] === 'cross-site' && headers['sec-fetch-mode'] === 'navigate' &&
+    headers['sec-fetch-dest'] === 'document';
   if (headers.host !== host ||
       (headers.origin !== undefined && headers.origin !== config.localOrigin) ||
-      (headers['sec-fetch-site'] !== undefined && !['same-origin', 'none'].includes(headers['sec-fetch-site']))) {
+      (headers['sec-fetch-site'] !== undefined && !['same-origin', 'none'].includes(headers['sec-fetch-site']) && !returnDocument)) {
     throw boundaryError('FORBIDDEN');
   }
   if (mutation) {
