@@ -1,5 +1,7 @@
 # OpenSwitch Platform
 
+[Generic OpenSwitch web integration starter](integrations/web-starter/README.md)
+
 This repository organizes the payment platform around a pinned, independently tracked Hyperswitch submodule. It is not a copy of Hyperswitch source.
 
 ## Clone
