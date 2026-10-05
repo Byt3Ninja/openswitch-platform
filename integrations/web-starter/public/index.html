@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenSwitch · Generic checkout example</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/checkout.mjs"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">OpenSwitch · integration example</p>
+      <h1>Checkout</h1>
+      <p class="intro">A local, provider-neutral checkout with backend-verified order status.</p>
+    </header>
+
+    <section class="mode-panel" aria-labelledby="mode">
+      <h2 id="mode">Loading mode</h2>
+      <p id="mode-description">Waiting for the local server configuration.</p>
+    </section>
+
+    <div class="checkout-layout">
+      <section class="panel" aria-labelledby="catalog-heading">
+        <h2 id="catalog-heading">Choose an item</h2>
+        <label for="catalog">Catalog item</label>
+        <select id="catalog" aria-describedby="catalog-help" disabled></select>
+        <p class="helper" id="catalog-help">The server catalog sets the amount and currency.</p>
+        <dl class="total"><dt>Order total</dt><dd id="amount">—</dd></dl>
+        <dl id="order-details" class="order-details" hidden>
+          <dt>Local order</dt><dd id="order-id"></dd>
+          <dt>Payment reference</dt><dd id="payment-id"></dd>
+          <dt>Backend status</dt><dd id="backend-status"></dd>
+        </dl>
+      </section>
+
+      <section class="panel" id="checkout-region" aria-labelledby="checkout-heading" aria-busy="true">
+        <h2 id="checkout-heading">Payment &amp; status</h2>
+        <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true">Connecting to this local example…</p>
+        <p id="error" class="error" role="alert" hidden></p>
+        <p id="return-note" class="helper" hidden>No saved local order was found for this return. Redirect results cannot verify a payment. Reconcile the original order with your administrator before creating another.</p>
+        <p id="recovery-note" class="helper" hidden>This recovered sandbox order is available for status checks. Confirm its outcome with your administrator before starting another payment.</p>
+
+        <div id="payment-widget-region" hidden>
+          <p class="helper">Hosted sandbox payment form</p>
+          <div id="payment-widget"></div>
+        </div>
+
+        <button class="primary" id="start" type="button" disabled>Start simulated checkout</button>
+        <button class="primary" id="confirm" type="button" hidden disabled>Confirm sandbox payment</button>
+
+        <fieldset id="demo-controls" hidden>
+          <legend>Simulate an outcome</legend>
+          <p class="helper">These buttons update this local demo only. No money moves.</p>
+          <div class="actions">
+            <button class="primary" type="button" data-outcome="succeeded" disabled>Simulate success</button>
+            <button type="button" data-outcome="failed" disabled>Simulate failure</button>
+            <button type="button" data-outcome="cancelled" disabled>Simulate cancellation</button>
+          </div>
+        </fieldset>
+        <div class="actions secondary-actions">
+          <button type="button" id="refresh" hidden disabled>Check order status</button>
+          <button type="button" id="new-order" hidden>Create another order</button>
+        </div>
+      </section>
+    </div>
+    <footer>Local developer example. Live mode is unavailable. A redirect or SDK result never fulfils an order.</footer>
+    <noscript><p class="error">JavaScript is required for this local example. No payment has been started.</p></noscript>
+  </main>
+</body>
+</html>

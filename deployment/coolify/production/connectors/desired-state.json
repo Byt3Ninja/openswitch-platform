@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "routing": "explicit_only",
+  "providers": {
+    "kashier": {
+      "environment": "test",
+      "base_url": "https://test-api.kashier.io/"
+    },
+    "easykash": {
+      "environment": "low_risk_live_pilot",
+      "base_url": "https://back.easykash.net/"
+    }
+  },
+  "profiles": [
+    {
+      "merchant": "GrowthLabs Sandbox",
+      "profile": "MulkStay Sandbox",
+      "connectors": ["kashier"]
+    },
+    {
+      "merchant": "GrowthLabs Sandbox",
+      "profile": "Startpad Sandbox",
+      "connectors": ["kashier"]
+    },
+    {
+      "merchant": "GrowthLabs Sandbox",
+      "profile": "Hackathon Sandbox",
+      "connectors": ["kashier"]
+    },
+    {
+      "merchant": "Healiot Egypt Sandbox",
+      "profile": "WQ3 Sandbox",
+      "connectors": ["kashier", "easykash"]
+    }
+  ],
+  "excluded_profiles": ["MulkStay", "Startpad", "Hackathon", "WQ3"],
+  "supported_flows": ["hosted_card_automatic_capture", "payment_sync", "signed_payment_webhook"],
+  "unsupported_flows": ["manual_capture", "void", "refund", "saved_card", "recurring_payment", "payout"]
+}

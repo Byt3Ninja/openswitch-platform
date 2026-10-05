@@ -3,3 +3,4 @@ __pycache__/
 
 # Runtime-only production inventory, generated identifiers, and backup evidence.
 deployment/coolify/production/organization/private/
+deployment/coolify/production/connectors/private/
